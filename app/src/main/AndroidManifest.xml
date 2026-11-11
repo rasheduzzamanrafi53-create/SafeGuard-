@@ -4,7 +4,7 @@
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="SafeGuard"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:theme="@style/Theme.SafeGuard">
         <activity
             android:name=".MainActivity"
             android:exported="true">
