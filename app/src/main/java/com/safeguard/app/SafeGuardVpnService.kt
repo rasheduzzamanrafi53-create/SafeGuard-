@@ -26,7 +26,10 @@ class SafeGuardVpnService : VpnService() {
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+val running: StateFlow<Boolean> = _isRunning.asStateFlow()
 
+private val _blockedCount = MutableStateFlow(0)
+val blockedCount: StateFlow<Int> = _blockedCount.asStateFlow()
         fun start(context: Context) {
             val intent = Intent(context, SafeGuardVpnService::class.java).apply {
                 action = ACTION_START
