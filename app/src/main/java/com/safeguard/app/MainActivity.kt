@@ -39,7 +39,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val dark = isSystemInDarkTheme()
+            var themeMode by remember { mutableStateOf(0) } // 0=System 1=Light 2=Dark
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (themeMode) {
+                1 -> false
+                2 -> true
+                else -> systemDark
+            }
             val colors = if (dark) {
                 darkColorScheme(primary = Color(0xFF4DB6AC))
             } else {
@@ -47,7 +53,10 @@ class MainActivity : ComponentActivity() {
             }
             MaterialTheme(colorScheme = colors) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Dashboard()
+                    Dashboard(
+                        themeMode = themeMode,
+                        onThemeChange = { themeMode = (themeMode + 1) % 3 }
+                    )
                 }
             }
         }
@@ -55,7 +64,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Dashboard() {
+fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
     var bangla by remember { mutableStateOf(false) }
     var protectionOn by remember { mutableStateOf(false) }
 
@@ -67,6 +76,11 @@ fun Dashboard() {
     val toggleOn = if (bangla) "সুরক্ষা চালু করুন" else "Turn protection ON"
     val toggleOff = if (bangla) "সুরক্ষা বন্ধ করুন" else "Turn protection OFF"
     val langButton = if (bangla) "English" else "বাংলা"
+    val themeLabel = when (themeMode) {
+        1 -> if (bangla) "থিম: লাইট" else "Theme: Light"
+        2 -> if (bangla) "থিম: ডার্ক" else "Theme: Dark"
+        else -> if (bangla) "থিম: সিস্টেম" else "Theme: System"
+    }
     val note = if (bangla)
         "এটি একটি পরীক্ষামূলক সংস্করণ। ব্লকিং এখনো সক্রিয় নয়।"
     else
@@ -87,6 +101,11 @@ fun Dashboard() {
             Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold)
             OutlinedButton(onClick = { bangla = !bangla }) { Text(langButton) }
         }
+
+        OutlinedButton(
+            onClick = onThemeChange,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(themeLabel) }
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -133,3 +152,7 @@ fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
         }
     }
 }
+
+
+ 
+
