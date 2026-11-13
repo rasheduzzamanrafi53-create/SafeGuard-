@@ -272,7 +272,15 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         ) {
             Text(if (protectionOn) toggleOff else toggleOn)
         }
-
+OutlinedButton(
+            onClick = {
+                val admin = android.content.ComponentName(context, SafeGuardAdminReceiver::class.java)
+                val i = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                i.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                context.startActivity(i)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(if (bangla) "আনইনস্টল সুরক্ষা চালু করুন" else "Enable Uninstall Protection") }
         Spacer(modifier = Modifier.height(8.dp))
         Text(note, fontSize = 13.sp)
     }
