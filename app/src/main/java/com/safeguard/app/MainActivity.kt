@@ -21,13 +21,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -72,17 +75,46 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private val WORDS = listOf(
+    "river", "mango", "tiger", "cloud", "stone", "candle", "window", "garden",
+    "pencil", "silver", "market", "bridge", "forest", "orange", "thunder",
+    "button", "carpet", "island", "rocket", "violin", "lantern", "pepper",
+    "ladder", "magnet", "pillow", "jungle", "anchor", "bottle", "dragon", "saddle"
+)
+
+private const val SENTENCE_WORDS = 12
+private const val TIME_LIMIT_SECONDS = 120
+
+private fun randomSentence(count: Int): String =
+    List(count) { WORDS.random() }.joinToString(" ")
+
 @Composable
 fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
     val context = LocalContext.current
     var bangla by remember { mutableStateOf(false) }
     var protectionOn by remember { mutableStateOf(SafeGuardVpnService.running) }
+    var showConfirm by remember { mutableStateOf(false) }
+    var sentence by remember { mutableStateOf("") }
+    var typed by remember { mutableStateOf("") }
+    var secondsLeft by remember { mutableStateOf(TIME_LIMIT_SECONDS) }
 
-    // Re-check the real VPN state every second
     LaunchedEffect(Unit) {
         while (true) {
             protectionOn = SafeGuardVpnService.running
             kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    // Countdown while the dialog is open
+    LaunchedEffect(showConfirm, sentence) {
+        if (showConfirm) {
+            secondsLeft = TIME_LIMIT_SECONDS
+            while (secondsLeft > 0) {
+                kotlinx.coroutines.delay(1000)
+                secondsLeft -= 1
+            }
+            showConfirm = false
+            typed = ""
         }
     }
 
@@ -127,9 +159,54 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         else -> if (bangla) "থিম: সিস্টেম" else "Theme: System"
     }
     val note = if (bangla)
-        "এটি একটি পরীক্ষামূলক সংস্করণ। VPN চালু হয়, কিন্তু সাইট ব্লকিং এখনো সক্রিয় নয়।"
+        "VPN বন্ধ করতে ২ মিনিটের মধ্যে লম্বা বাক্য হুবহু টাইপ করতে হবে। কপি-পেস্ট চলবে না।"
     else
-        "This is a preview version. The VPN starts, but site blocking is not active yet."
+        "To turn the VPN off you must type a long sentence exactly within 2 minutes. Pasting is blocked."
+    val dialogTitle = if (bangla) "বাক্যটি টাইপ করুন" else "Type this sentence"
+    val confirmText = if (bangla) "বন্ধ করুন" else "Turn off"
+    val cancelText = if (bangla) "বাতিল" else "Cancel"
+    val hint = if (bangla) "এখানে টাইপ করুন" else "Type here"
+    val timeText = if (bangla) "বাকি সময়: $secondsLeft সেকেন্ড" else "Time left: $secondsLeft s"
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text(dialogTitle) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(timeText, fontSize = 14.sp)
+                    // Plain Text (not selectable) so it cannot be copied
+                    Text(sentence, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    OutlinedTextField(
+                        value = typed,
+                        onValueChange = { new ->
+                            // Reject pastes: only 1-2 characters may be added at once
+                            if (new.length - typed.length <= 2) typed = new
+                        },
+                        label = { Text(hint) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (typed.trim() == sentence) {
+                            showConfirm = false
+                            typed = ""
+                            stopVpnService()
+                        } else {
+                            sentence = randomSentence(SENTENCE_WORDS)
+                            typed = ""
+                        }
+                    }
+                ) { Text(confirmText) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false; typed = "" }) { Text(cancelText) }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -172,14 +249,16 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            StatCard(blockedLabel, "0", Modifier.weight(1f))
-            StatCard(totalLabel, "0", Modifier.weight(1f))
+            StatCard(blockedLabel, SafeGuardVpnService.blockedCount.toString(), Modifier.weight(1f))
+            StatCard(totalLabel, SafeGuardVpnService.blockedCount.toString(), Modifier.weight(1f))
         }
 
         Button(
             onClick = {
                 if (protectionOn) {
-                    stopVpnService()
+                    sentence = randomSentence(SENTENCE_WORDS)
+                    typed = ""
+                    showConfirm = true
                 } else {
                     val prepare = VpnService.prepare(context)
                     if (prepare != null) {
