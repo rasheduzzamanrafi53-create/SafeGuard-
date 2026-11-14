@@ -14,7 +14,19 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
 
+        BlockStore.init(this)
+
         if (System.currentTimeMillis() < pausedUntil) return
+
+        // 0) Apps you blocked: opening them sends you Home
+        if (BlockStore.apps.contains(pkg) &&
+            pkg != packageName &&
+            pkg != "com.android.settings" &&
+            !LAUNCHER_PACKAGES.contains(pkg)
+        ) {
+            kickOut()
+            return
+        }
 
         // 1) Search box words in YouTube and browsers
         if (SEARCH_PACKAGES.contains(pkg)) {
@@ -43,7 +55,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (danger) kickOut()
     }
 
-    // Only looks at editable text fields (search boxes). Passwords are skipped.
     private fun searchHasBlockedWord(node: AccessibilityNodeInfo?, depth: Int): Boolean {
         if (node == null || depth > 25) return false
         if (node.isEditable && !node.isPassword) {
@@ -57,13 +68,16 @@ class SafeGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun containsBlockedWord(text: String): Boolean {
-        // Normalise common tricks: p0rn, p.o.r.n, s3x
         val cleaned = text
             .replace('0', 'o').replace('1', 'i').replace('3', 'e')
             .replace('4', 'a').replace('5', 's').replace('@', 'a').replace('$', 's')
         val squashed = cleaned.replace(Regex("[^a-z]"), "")
         for (w in SEARCH_WORDS) {
             if (cleaned.contains(w) || squashed.contains(w)) return true
+        }
+        for (w in BlockStore.keywords) {
+            val ww = w.replace(" ", "")
+            if (ww.length >= 2 && (cleaned.contains(w) || squashed.contains(ww))) return true
         }
         return false
     }
@@ -182,7 +196,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         @Volatile
         var pausedUntil: Long = 0L
 
-        // Search boxes are watched in these apps only
         private val SEARCH_PACKAGES = setOf(
             "com.google.android.youtube",
             "com.android.chrome",
@@ -194,7 +207,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
             "com.google.android.googlequicksearchbox"
         )
 
-        // Unmistakable explicit words only (avoid blocking normal searches)
         private val SEARCH_WORDS = listOf(
             "porn", "xxx", "hentai", "nude", "nudes", "naked", "sexvideo",
             "sexvideos", "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans",
