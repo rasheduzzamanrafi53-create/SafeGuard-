@@ -17,12 +17,8 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (!WATCHED_PACKAGES.contains(pkg)) return
         if (System.currentTimeMillis() < pausedUntil) return
 
-        val root = rootInActiveWindow
-        if (root == null) {
-            // Could not read the page yet: be safe, leave Settings
-            kickOut()
-            return
-        }
+        // Page not readable yet: do nothing, the next event retries
+        val root = rootInActiveWindow ?: return
 
         val texts = StringBuilder()
         collectText(root, texts, 0)
@@ -33,7 +29,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // Back first (leaves the dangerous page), then Home, repeated a few times
     private fun kickOut() {
         performGlobalAction(GLOBAL_ACTION_BACK)
         performGlobalAction(GLOBAL_ACTION_HOME)
@@ -55,22 +50,44 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
     }
 
+    // The main "Network & internet" page has these words. The VPN page does not.
+    private fun isNetworkMainPage(screen: String): Boolean {
+        return screen.contains("hotspot") ||
+            screen.contains("airplane mode") ||
+            screen.contains("data saver") ||
+            screen.contains("private dns") ||
+            screen.contains("wi-fi") ||
+            screen.contains("mobile network")
+    }
+
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
 
+        // Uninstall dialog
         if (pkg.contains("packageinstaller") && mentionsApp) return true
 
+        // SafeGuard app info (uninstall / force stop)
         if (mentionsApp && (screen.contains("uninstall") || screen.contains("force stop"))) {
             return true
         }
 
+        // Device admin pages
         if (screen.contains("device admin") && (mentionsApp || screen.contains("admin apps"))) {
             return true
         }
 
+        // Accessibility page that lists SafeGuard
         if (mentionsApp && screen.contains("accessibility")) return true
 
-        if (mentionsApp && screen.contains("vpn")) return true
+        // VPN settings of SafeGuard (always-on, forget)
+        if (mentionsApp && (
+                screen.contains("always-on vpn") ||
+                screen.contains("block connections without vpn") ||
+                screen.contains("forget"))
+        ) return true
+
+        // VPN list page: mentions SafeGuard and VPN, but is NOT the Network main page
+        if (mentionsApp && screen.contains("vpn") && !isNetworkMainPage(screen)) return true
 
         return false
     }
