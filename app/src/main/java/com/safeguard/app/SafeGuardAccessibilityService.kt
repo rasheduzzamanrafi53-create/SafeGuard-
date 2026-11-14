@@ -86,6 +86,12 @@ class SafeGuardAccessibilityService : AccessibilityService() {
 
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
+                // Reset app preferences (menu row or confirmation dialog)
+      if (pkg == "com.android.settings" && (
+                screen.contains("reset app preferences") ||
+                screen.contains("reset app settings") ||
+                screen.contains("reset apps"))
+        ) return true
 
         if (pkg.contains("packageinstaller") && mentionsApp) return true
 
