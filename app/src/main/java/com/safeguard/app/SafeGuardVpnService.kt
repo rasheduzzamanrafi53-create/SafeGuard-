@@ -34,6 +34,7 @@ class SafeGuardVpnService : VpnService() {
 
     private fun startVpn() {
         if (tunnel != null) return
+        BlockStore.init(this)
         val pfd = Builder()
             .setSession("SafeGuard")
             .addAddress("10.0.0.2", 32)
@@ -89,8 +90,6 @@ class SafeGuardVpnService : VpnService() {
             return
         }
 
-        // SafeSearch: ask the upstream for the safe hostname instead,
-        // then give the answer back under the original name
         val safeHost = SAFE_SEARCH[name]
         if (safeHost != null) {
             pool?.execute { forwardSafe(dns, qEnd, safeHost, dstIp, srcIp, srcPort, out) }
@@ -119,7 +118,6 @@ class SafeGuardVpnService : VpnService() {
         for (server in UPSTREAM_SERVERS) {
             val reply = ask(server, rewritten)
             if (reply != null) {
-                // Keep the original question bytes so the app accepts the answer
                 val fixed = restoreQuestion(reply, dns, qEnd)
                 write(out, buildPacket(dstIp, srcIp, 53, srcPort, fixed))
                 return
@@ -145,7 +143,6 @@ class SafeGuardVpnService : VpnService() {
         }
     }
 
-    // Build a query for safeHost, keeping id/flags and the qtype/qclass
     private fun rewriteQuestion(dns: ByteArray, qEnd: Int, safeHost: String): ByteArray {
         val header = dns.copyOfRange(0, 12)
         val tail = dns.copyOfRange(qEnd - 4, qEnd)
@@ -160,7 +157,6 @@ class SafeGuardVpnService : VpnService() {
         return out
     }
 
-    // Put the original question back in front of the answer section
     private fun restoreQuestion(reply: ByteArray, original: ByteArray, qEnd: Int): ByteArray {
         var i = 12
         while (i < reply.size && (reply[i].toInt() and 0xFF) != 0) {
@@ -229,10 +225,14 @@ class SafeGuardVpnService : VpnService() {
         for (k in 6..11) r[k] = 0
         return r
     }
+
     private fun isBlocked(domain: String): Boolean {
-        BlockStore.init(this)
         if (BlockStore.domainBlocked(domain)) return true
-    }
+        if (HARD_BLOCK.any { domain == it || domain.endsWith(".$it") }) return true
+        if (WHITELIST.any { domain == it || domain.endsWith(".$it") }) return false
+        for (kw in KEYWORDS) {
+            if (domain.contains(kw)) return true
+        }
         var d = domain
         while (true) {
             if (BLOCKED_DOMAINS.contains(d)) return true
@@ -328,7 +328,7 @@ class SafeGuardVpnService : VpnService() {
         private const val CHANNEL_ID = "safeguard_protection"
         private const val NOTIFICATION_ID = 1
 
-        // CleanBrowsing Adult Filter (blocks adult sites at the DNS level)
+        // CleanBrowsing Adult Filter
         private val UPSTREAM_SERVERS = listOf("185.228.168.10", "185.228.169.11")
 
         @Volatile
@@ -337,7 +337,6 @@ class SafeGuardVpnService : VpnService() {
         @Volatile
         var blockedCount: Int = 0
 
-        // SafeSearch enforcement
         private val SAFE_SEARCH = mapOf(
             "google.com" to "forcesafesearch.google.com",
             "www.google.com" to "forcesafesearch.google.com",
@@ -345,15 +344,16 @@ class SafeGuardVpnService : VpnService() {
             "www.google.com.bd" to "forcesafesearch.google.com",
             "bing.com" to "strict.bing.com",
             "www.bing.com" to "strict.bing.com",
-            "youtube.com" to "restrict.youtube.com",
-            "www.youtube.com" to "restrict.youtube.com",
-            "m.youtube.com" to "restrict.youtube.com",
-            "youtubei.googleapis.com" to "restrict.youtube.com",
             "duckduckgo.com" to "safe.duckduckgo.com",
             "www.duckduckgo.com" to "safe.duckduckgo.com"
         )
 
-        // Only unmistakable adult words, to avoid blocking normal sites
+        // YouTube fully blocked (use the class timer feature later)
+        private val HARD_BLOCK = listOf(
+            "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com",
+            "youtubei.googleapis.com", "youtube-nocookie.com"
+        )
+
         private val KEYWORDS = listOf(
             "porn", "hentai", "xvideos", "xnxx", "xhamster", "xxx",
             "sexcam", "livesex", "freeporn", "nudes", "camgirl", "camsex",
@@ -377,12 +377,12 @@ class SafeGuardVpnService : VpnService() {
             "pornone.com", "daftsex.com", "hqporner.com", "fapvid.com",
             "camsoda.com", "myfreecams.com", "imlive.com", "flirt4free.com",
             "rule34.xxx", "gelbooru.com", "danbooru.donmai.us", "hanime.tv",
-            "hentaihaven.xxx", "reddit-nsfw.com", "sex.com", "xhamster2.com",
-            "yespornplease.com", "pornpics.com", "nuvid.com", "slutload.com",
-            "xvideos2.com", "pornhubpremium.com", "fansly.com", "manyvids.com",
-            "clips4sale.com", "javmost.com", "jav.guru", "missav.com",
-            "spankwire.com", "keezmovies.com", "extremetube.com", "pornhd.com",
-            "gotporn.com", "sunporno.com", "empflix.com", "porndig.com"
+            "hentaihaven.xxx", "sex.com", "xhamster2.com", "pornpics.com",
+            "nuvid.com", "slutload.com", "xvideos2.com", "fansly.com",
+            "manyvids.com", "clips4sale.com", "javmost.com", "jav.guru",
+            "missav.com", "spankwire.com", "keezmovies.com", "extremetube.com",
+            "pornhd.com", "gotporn.com", "sunporno.com", "empflix.com",
+            "porndig.com"
         )
     }
 }
