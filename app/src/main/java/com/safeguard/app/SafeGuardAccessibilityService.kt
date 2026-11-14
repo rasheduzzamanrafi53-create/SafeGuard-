@@ -14,6 +14,7 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
 
+        // Ignore every app except Settings, installer and launchers
         if (!WATCHED_PACKAGES.contains(pkg)) return
         if (System.currentTimeMillis() < pausedUntil) return
 
@@ -23,9 +24,13 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         collectText(root, texts, 0)
         val screen = texts.toString().lowercase()
 
-        if (isDangerous(pkg, screen)) {
-            kickOut()
+        val danger = if (LAUNCHER_PACKAGES.contains(pkg)) {
+            isLauncherDanger(screen)
+        } else {
+            isDangerous(pkg, screen)
         }
+
+        if (danger) kickOut()
     }
 
     private fun kickOut() {
@@ -49,6 +54,17 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
     }
 
+    // Home screen: long-press menu or drag-to-uninstall target
+    private fun isLauncherDanger(screen: String): Boolean {
+        if (screen.contains("uninstall")) return true
+        if (screen.contains("safeguard") && (
+                screen.contains("app info") ||
+                screen.contains("remove") ||
+                screen.contains("pause app"))
+        ) return true
+        return false
+    }
+
     private fun isNetworkMainPage(screen: String): Boolean {
         return screen.contains("hotspot") ||
             screen.contains("airplane mode") ||
@@ -58,7 +74,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
             screen.contains("mobile network")
     }
 
-    // The main Privacy page has these rows; the Accessibility usage page does not
     private fun isPrivacyMainPage(screen: String): Boolean {
         return screen.contains("permission manager") ||
             screen.contains("privacy dashboard") ||
@@ -72,30 +87,24 @@ class SafeGuardAccessibilityService : AccessibilityService() {
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
 
-        // Uninstall dialog
         if (pkg.contains("packageinstaller") && mentionsApp) return true
 
-        // SafeGuard app info (uninstall / force stop)
         if (mentionsApp && (screen.contains("uninstall") || screen.contains("force stop"))) {
             return true
         }
 
-        // Device admin pages
         if (screen.contains("device admin") && (mentionsApp || screen.contains("admin apps"))) {
             return true
         }
 
-        // Accessibility usage page (inner page listing SafeGuard), not the Privacy main page
         if (mentionsApp && screen.contains("accessibility usage") && !isPrivacyMainPage(screen)) {
             return true
         }
 
-        // Accessibility list page that lists SafeGuard
         if (mentionsApp && screen.contains("accessibility") && !isPrivacyMainPage(screen)) {
             return true
         }
 
-        // SafeGuard's own accessibility service page
         if (mentionsApp && (
                 screen.contains("use safeguard") ||
                 screen.contains("stop safeguard") ||
@@ -103,14 +112,12 @@ class SafeGuardAccessibilityService : AccessibilityService() {
                 screen.contains("view and control screen"))
         ) return true
 
-        // VPN settings of SafeGuard
         if (mentionsApp && (
                 screen.contains("always-on vpn") ||
                 screen.contains("block connections without vpn") ||
                 screen.contains("forget"))
         ) return true
 
-        // VPN list page (not the Network main page)
         if (mentionsApp && screen.contains("vpn") && !isNetworkMainPage(screen)) return true
 
         return false
@@ -122,10 +129,20 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         @Volatile
         var pausedUntil: Long = 0L
 
+        private val LAUNCHER_PACKAGES = setOf(
+            "com.android.launcher3",
+            "com.google.android.apps.nexuslauncher",
+            "com.android.launcher",
+            "com.miui.home",
+            "com.sec.android.app.launcher",
+            "com.transsion.hilauncher",
+            "com.mediatek.launcher"
+        )
+
         private val WATCHED_PACKAGES = setOf(
             "com.android.settings",
             "com.android.packageinstaller",
             "com.google.android.packageinstaller"
-        )
+        ) + LAUNCHER_PACKAGES
     }
 }
