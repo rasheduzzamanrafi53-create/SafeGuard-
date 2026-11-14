@@ -229,12 +229,10 @@ class SafeGuardVpnService : VpnService() {
         for (k in 6..11) r[k] = 0
         return r
     }
-
     private fun isBlocked(domain: String): Boolean {
-        if (WHITELIST.any { domain == it || domain.endsWith(".$it") }) return false
-        for (kw in KEYWORDS) {
-            if (domain.contains(kw)) return true
-        }
+        BlockStore.init(this)
+        if (BlockStore.domainBlocked(domain)) return true
+    }
         var d = domain
         while (true) {
             if (BLOCKED_DOMAINS.contains(d)) return true
