@@ -14,9 +14,19 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
 
-        // Ignore every app except Settings, installer and launchers
-        if (!WATCHED_PACKAGES.contains(pkg)) return
         if (System.currentTimeMillis() < pausedUntil) return
+
+        // 1) Search box words in YouTube and browsers
+        if (SEARCH_PACKAGES.contains(pkg)) {
+            val root = rootInActiveWindow ?: return
+            if (searchHasBlockedWord(root, 0)) {
+                kickOut()
+                return
+            }
+        }
+
+        // 2) Settings / installer / launcher protection
+        if (!WATCHED_PACKAGES.contains(pkg)) return
 
         val root = rootInActiveWindow ?: return
 
@@ -31,6 +41,31 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
 
         if (danger) kickOut()
+    }
+
+    // Only looks at editable text fields (search boxes). Passwords are skipped.
+    private fun searchHasBlockedWord(node: AccessibilityNodeInfo?, depth: Int): Boolean {
+        if (node == null || depth > 25) return false
+        if (node.isEditable && !node.isPassword) {
+            val typed = node.text?.toString()?.lowercase() ?: ""
+            if (typed.isNotEmpty() && containsBlockedWord(typed)) return true
+        }
+        for (i in 0 until node.childCount) {
+            if (searchHasBlockedWord(node.getChild(i), depth + 1)) return true
+        }
+        return false
+    }
+
+    private fun containsBlockedWord(text: String): Boolean {
+        // Normalise common tricks: p0rn, p.o.r.n, s3x
+        val cleaned = text
+            .replace('0', 'o').replace('1', 'i').replace('3', 'e')
+            .replace('4', 'a').replace('5', 's').replace('@', 'a').replace('$', 's')
+        val squashed = cleaned.replace(Regex("[^a-z]"), "")
+        for (w in SEARCH_WORDS) {
+            if (cleaned.contains(w) || squashed.contains(w)) return true
+        }
+        return false
     }
 
     private fun kickOut() {
@@ -54,7 +89,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // Home screen: long-press menu or drag-to-uninstall target
     private fun isLauncherDanger(screen: String): Boolean {
         if (screen.contains("uninstall")) return true
         if (screen.contains("safeguard") && (
@@ -87,17 +121,14 @@ class SafeGuardAccessibilityService : AccessibilityService() {
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
 
-        // Uninstall dialog from the package installer
         if (pkg.contains("packageinstaller") && mentionsApp) return true
 
-        // Reset app preferences (menu row or confirmation dialog)
         if (pkg == "com.android.settings" && (
                 screen.contains("reset app preferences") ||
                 screen.contains("reset app settings") ||
                 screen.contains("reset apps"))
         ) return true
 
-        // Display over other apps: SafeGuard's permission page
         if (pkg == "com.android.settings" && mentionsApp && (
                 screen.contains("display over other apps") ||
                 screen.contains("appear on top") ||
@@ -105,34 +136,28 @@ class SafeGuardAccessibilityService : AccessibilityService() {
                 screen.contains("allow display over"))
         ) return true
 
-        // Battery settings of SafeGuard (restricted / optimization)
         if (pkg == "com.android.settings" && mentionsApp && (
                 screen.contains("battery") ||
                 screen.contains("restricted") ||
                 screen.contains("optimi"))
         ) return true
 
-        // SafeGuard app info (uninstall / force stop)
         if (mentionsApp && (screen.contains("uninstall") || screen.contains("force stop"))) {
             return true
         }
 
-        // Device admin pages
         if (screen.contains("device admin") && (mentionsApp || screen.contains("admin apps"))) {
             return true
         }
 
-        // Accessibility usage page (inner page), not the Privacy main page
         if (mentionsApp && screen.contains("accessibility usage") && !isPrivacyMainPage(screen)) {
             return true
         }
 
-        // Accessibility list page that lists SafeGuard
         if (mentionsApp && screen.contains("accessibility") && !isPrivacyMainPage(screen)) {
             return true
         }
 
-        // SafeGuard's own accessibility service page
         if (mentionsApp && (
                 screen.contains("use safeguard") ||
                 screen.contains("stop safeguard") ||
@@ -140,14 +165,12 @@ class SafeGuardAccessibilityService : AccessibilityService() {
                 screen.contains("view and control screen"))
         ) return true
 
-        // VPN settings of SafeGuard
         if (mentionsApp && (
                 screen.contains("always-on vpn") ||
                 screen.contains("block connections without vpn") ||
                 screen.contains("forget"))
         ) return true
 
-        // VPN list page (not the Network main page)
         if (mentionsApp && screen.contains("vpn") && !isNetworkMainPage(screen)) return true
 
         return false
@@ -158,6 +181,27 @@ class SafeGuardAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile
         var pausedUntil: Long = 0L
+
+        // Search boxes are watched in these apps only
+        private val SEARCH_PACKAGES = setOf(
+            "com.google.android.youtube",
+            "com.android.chrome",
+            "org.mozilla.firefox",
+            "com.microsoft.emmx",
+            "com.brave.browser",
+            "com.opera.browser",
+            "com.sec.android.app.sbrowser",
+            "com.google.android.googlequicksearchbox"
+        )
+
+        // Unmistakable explicit words only (avoid blocking normal searches)
+        private val SEARCH_WORDS = listOf(
+            "porn", "xxx", "hentai", "nude", "nudes", "naked", "sexvideo",
+            "sexvideos", "pornhub", "xvideos", "xnxx", "xhamster", "onlyfans",
+            "blowjob", "handjob", "milf", "camgirl", "erotic", "fuckvideo",
+            "pussy", "boobs", "bdsm", "hotvideo", "nangavideo", "chudai",
+            "bhabhi", "sexscene", "stripper", "orgasm", "masturbat"
+        )
 
         private val LAUNCHER_PACKAGES = setOf(
             "com.android.launcher3",
