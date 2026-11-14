@@ -17,7 +17,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         if (!WATCHED_PACKAGES.contains(pkg)) return
         if (System.currentTimeMillis() < pausedUntil) return
 
-        // Page not readable yet: do nothing, the next event retries
         val root = rootInActiveWindow ?: return
 
         val texts = StringBuilder()
@@ -50,7 +49,6 @@ class SafeGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // The main "Network & internet" page has these words. The VPN page does not.
     private fun isNetworkMainPage(screen: String): Boolean {
         return screen.contains("hotspot") ||
             screen.contains("airplane mode") ||
@@ -58,6 +56,17 @@ class SafeGuardAccessibilityService : AccessibilityService() {
             screen.contains("private dns") ||
             screen.contains("wi-fi") ||
             screen.contains("mobile network")
+    }
+
+    // The main Privacy page has these rows; the Accessibility usage page does not
+    private fun isPrivacyMainPage(screen: String): Boolean {
+        return screen.contains("permission manager") ||
+            screen.contains("privacy dashboard") ||
+            screen.contains("show passwords") ||
+            screen.contains("lock screen") ||
+            screen.contains("autofill") ||
+            screen.contains("ads") ||
+            screen.contains("clipboard")
     }
 
     private fun isDangerous(pkg: String, screen: String): Boolean {
@@ -76,17 +85,32 @@ class SafeGuardAccessibilityService : AccessibilityService() {
             return true
         }
 
-        // Accessibility page that lists SafeGuard
-        if (mentionsApp && screen.contains("accessibility")) return true
+        // Accessibility usage page (inner page listing SafeGuard), not the Privacy main page
+        if (mentionsApp && screen.contains("accessibility usage") && !isPrivacyMainPage(screen)) {
+            return true
+        }
 
-        // VPN settings of SafeGuard (always-on, forget)
+        // Accessibility list page that lists SafeGuard
+        if (mentionsApp && screen.contains("accessibility") && !isPrivacyMainPage(screen)) {
+            return true
+        }
+
+        // SafeGuard's own accessibility service page
+        if (mentionsApp && (
+                screen.contains("use safeguard") ||
+                screen.contains("stop safeguard") ||
+                screen.contains("full control") ||
+                screen.contains("view and control screen"))
+        ) return true
+
+        // VPN settings of SafeGuard
         if (mentionsApp && (
                 screen.contains("always-on vpn") ||
                 screen.contains("block connections without vpn") ||
                 screen.contains("forget"))
         ) return true
 
-        // VPN list page: mentions SafeGuard and VPN, but is NOT the Network main page
+        // VPN list page (not the Network main page)
         if (mentionsApp && screen.contains("vpn") && !isNetworkMainPage(screen)) return true
 
         return false
