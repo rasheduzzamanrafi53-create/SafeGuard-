@@ -312,7 +312,16 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text(pauseText) }
-
+        OutlinedButton(
+            onClick = {
+                val i = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + context.packageName)
+                )
+                context.startActivity(i)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(if (bangla) "বুট কাউন্টডাউনের অনুমতি দিন" else "Allow boot countdown") }
         Spacer(modifier = Modifier.height(8.dp))
         Text(note, fontSize = 13.sp)
     }
