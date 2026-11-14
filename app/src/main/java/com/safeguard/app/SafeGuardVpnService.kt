@@ -228,7 +228,6 @@ class SafeGuardVpnService : VpnService() {
 
     private fun isBlocked(domain: String): Boolean {
         if (BlockStore.domainBlocked(domain)) return true
-        if (HARD_BLOCK.any { domain == it || domain.endsWith(".$it") }) return true
         if (WHITELIST.any { domain == it || domain.endsWith(".$it") }) return false
         for (kw in KEYWORDS) {
             if (domain.contains(kw)) return true
@@ -337,6 +336,7 @@ class SafeGuardVpnService : VpnService() {
         @Volatile
         var blockedCount: Int = 0
 
+        // SafeSearch / Restricted Mode enforcement
         private val SAFE_SEARCH = mapOf(
             "google.com" to "forcesafesearch.google.com",
             "www.google.com" to "forcesafesearch.google.com",
@@ -344,14 +344,12 @@ class SafeGuardVpnService : VpnService() {
             "www.google.com.bd" to "forcesafesearch.google.com",
             "bing.com" to "strict.bing.com",
             "www.bing.com" to "strict.bing.com",
+            "youtube.com" to "restrict.youtube.com",
+            "www.youtube.com" to "restrict.youtube.com",
+            "m.youtube.com" to "restrict.youtube.com",
+            "youtubei.googleapis.com" to "restrict.youtube.com",
             "duckduckgo.com" to "safe.duckduckgo.com",
             "www.duckduckgo.com" to "safe.duckduckgo.com"
-        )
-
-        // YouTube fully blocked (use the class timer feature later)
-        private val HARD_BLOCK = listOf(
-            "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com",
-            "youtubei.googleapis.com", "youtube-nocookie.com"
         )
 
         private val KEYWORDS = listOf(
