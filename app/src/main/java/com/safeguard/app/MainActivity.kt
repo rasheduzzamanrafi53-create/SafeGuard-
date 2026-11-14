@@ -2,10 +2,13 @@ package com.safeguard.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -84,6 +87,7 @@ private val WORDS = listOf(
 
 private const val SENTENCE_WORDS = 12
 private const val TIME_LIMIT_SECONDS = 120
+private const val PAUSE_MINUTES = 10L
 
 private fun randomSentence(count: Int): String =
     List(count) { WORDS.random() }.joinToString(" ")
@@ -94,6 +98,7 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
     var bangla by remember { mutableStateOf(false) }
     var protectionOn by remember { mutableStateOf(SafeGuardVpnService.running) }
     var showConfirm by remember { mutableStateOf(false) }
+    var pendingAction by remember { mutableStateOf(0) } // 0 = turn VPN off, 1 = pause settings protection
     var sentence by remember { mutableStateOf("") }
     var typed by remember { mutableStateOf("") }
     var secondsLeft by remember { mutableStateOf(TIME_LIMIT_SECONDS) }
@@ -105,7 +110,6 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         }
     }
 
-    // Countdown while the dialog is open
     LaunchedEffect(showConfirm, sentence) {
         if (showConfirm) {
             secondsLeft = TIME_LIMIT_SECONDS
@@ -159,14 +163,17 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         else -> if (bangla) "থিম: সিস্টেম" else "Theme: System"
     }
     val note = if (bangla)
-        "VPN বন্ধ করতে ২ মিনিটের মধ্যে লম্বা বাক্য হুবহু টাইপ করতে হবে। কপি-পেস্ট চলবে না।"
+        "VPN বন্ধ বা জরুরি বিরতির জন্য ২ মিনিটের মধ্যে লম্বা বাক্য হুবহু টাইপ করতে হবে। কপি-পেস্ট চলবে না।"
     else
-        "To turn the VPN off you must type a long sentence exactly within 2 minutes. Pasting is blocked."
+        "To turn the VPN off or pause protection you must type a long sentence exactly within 2 minutes. Pasting is blocked."
     val dialogTitle = if (bangla) "বাক্যটি টাইপ করুন" else "Type this sentence"
-    val confirmText = if (bangla) "বন্ধ করুন" else "Turn off"
+    val confirmText = if (bangla) "নিশ্চিত করুন" else "Confirm"
     val cancelText = if (bangla) "বাতিল" else "Cancel"
     val hint = if (bangla) "এখানে টাইপ করুন" else "Type here"
     val timeText = if (bangla) "বাকি সময়: $secondsLeft সেকেন্ড" else "Time left: $secondsLeft s"
+    val adminText = if (bangla) "আনইনস্টল সুরক্ষা চালু করুন" else "Enable Uninstall Protection"
+    val accText = if (bangla) "সেটিংস সুরক্ষা চালু করুন" else "Enable Settings Protection"
+    val pauseText = if (bangla) "জরুরি বিরতি (১০ মিনিট)" else "Emergency pause (10 min)"
 
     if (showConfirm) {
         AlertDialog(
@@ -175,12 +182,10 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(timeText, fontSize = 14.sp)
-                    // Plain Text (not selectable) so it cannot be copied
                     Text(sentence, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     OutlinedTextField(
                         value = typed,
                         onValueChange = { new ->
-                            // Reject pastes: only 1-2 characters may be added at once
                             if (new.length - typed.length <= 2) typed = new
                         },
                         label = { Text(hint) },
@@ -194,7 +199,12 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
                         if (typed.trim() == sentence) {
                             showConfirm = false
                             typed = ""
-                            stopVpnService()
+                            if (pendingAction == 0) {
+                                stopVpnService()
+                            } else {
+                                SafeGuardAccessibilityService.pausedUntil =
+                                    System.currentTimeMillis() + PAUSE_MINUTES * 60 * 1000
+                            }
                         } else {
                             sentence = randomSentence(SENTENCE_WORDS)
                             typed = ""
@@ -256,6 +266,7 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         Button(
             onClick = {
                 if (protectionOn) {
+                    pendingAction = 0
                     sentence = randomSentence(SENTENCE_WORDS)
                     typed = ""
                     showConfirm = true
@@ -272,15 +283,36 @@ fun Dashboard(themeMode: Int, onThemeChange: () -> Unit) {
         ) {
             Text(if (protectionOn) toggleOff else toggleOn)
         }
-OutlinedButton(
+
+        OutlinedButton(
             onClick = {
-                val admin = android.content.ComponentName(context, SafeGuardAdminReceiver::class.java)
-                val i = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                i.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                val admin = ComponentName(context, SafeGuardAdminReceiver::class.java)
+                val i = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
                 context.startActivity(i)
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text(if (bangla) "আনইনস্টল সুরক্ষা চালু করুন" else "Enable Uninstall Protection") }
+        ) { Text(adminText) }
+
+        OutlinedButton(
+            onClick = {
+                val i = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(i)
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(accText) }
+
+        OutlinedButton(
+            onClick = {
+                pendingAction = 1
+                sentence = randomSentence(SENTENCE_WORDS)
+                typed = ""
+                showConfirm = true
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(pauseText) }
+
         Spacer(modifier = Modifier.height(8.dp))
         Text(note, fontSize = 13.sp)
     }
