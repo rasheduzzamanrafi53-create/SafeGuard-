@@ -8,6 +8,10 @@ import android.net.VpnService
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != Intent.ACTION_BOOT_COMPLETED) return
+
+        // Cover the screen for 10 seconds while protection starts
+        BootOverlay.show(context)
+
         if (VpnService.prepare(context) == null) {
             context.startForegroundService(Intent(context, SafeGuardVpnService::class.java))
         }
