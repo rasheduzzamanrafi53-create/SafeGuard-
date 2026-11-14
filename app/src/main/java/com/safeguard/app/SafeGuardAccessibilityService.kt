@@ -1,35 +1,48 @@
 package com.safeguard.app
 
 import android.accessibilityservice.AccessibilityService
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 class SafeGuardAccessibilityService : AccessibilityService() {
 
-    @Volatile
-    private var lastActionTime = 0L
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
 
-        // Only watch Settings and the package installer, nothing else
         if (!WATCHED_PACKAGES.contains(pkg)) return
-
-        // Emergency pause: do nothing while paused
         if (System.currentTimeMillis() < pausedUntil) return
 
-        val root = rootInActiveWindow ?: return
+        val root = rootInActiveWindow
+        if (root == null) {
+            // Could not read the page yet: be safe, leave Settings
+            kickOut()
+            return
+        }
+
         val texts = StringBuilder()
         collectText(root, texts, 0)
         val screen = texts.toString().lowercase()
 
         if (isDangerous(pkg, screen)) {
-            val now = System.currentTimeMillis()
-            if (now - lastActionTime > 800) {
-                lastActionTime = now
-                performGlobalAction(GLOBAL_ACTION_HOME)
-            }
+            kickOut()
+        }
+    }
+
+    // Back first (leaves the dangerous page), then Home, repeated a few times
+    private fun kickOut() {
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        for (i in 1..4) {
+            handler.postDelayed({
+                if (System.currentTimeMillis() >= pausedUntil) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                }
+            }, i * 300L)
         }
     }
 
@@ -45,23 +58,18 @@ class SafeGuardAccessibilityService : AccessibilityService() {
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
 
-        // Uninstall dialog from the package installer
         if (pkg.contains("packageinstaller") && mentionsApp) return true
 
-        // App info page of SafeGuard (uninstall / force stop)
         if (mentionsApp && (screen.contains("uninstall") || screen.contains("force stop"))) {
             return true
         }
 
-        // Device admin list or SafeGuard's admin page
         if (screen.contains("device admin") && (mentionsApp || screen.contains("admin apps"))) {
             return true
         }
 
-        // Accessibility page that lists SafeGuard
         if (mentionsApp && screen.contains("accessibility")) return true
 
-        // VPN settings page that lists SafeGuard
         if (mentionsApp && screen.contains("vpn")) return true
 
         return false
