@@ -86,6 +86,14 @@ class SafeGuardVpnService : VpnService() {
             blockedCount++
             val reply = nxdomain(dns, qEnd)
             write(out, buildPacket(dstIp, srcIp, 53, srcPort, reply))
+            return
+        }
+
+        // SafeSearch: ask the upstream for the safe hostname instead,
+        // then give the answer back under the original name
+        val safeHost = SAFE_SEARCH[name]
+        if (safeHost != null) {
+            pool?.execute { forwardSafe(dns, qEnd, safeHost, dstIp, srcIp, srcPort, out) }
         } else {
             pool?.execute { forward(dns, dstIp, srcIp, srcPort, out) }
         }
@@ -95,24 +103,92 @@ class SafeGuardVpnService : VpnService() {
         dns: ByteArray, dstIp: ByteArray, srcIp: ByteArray, srcPort: Int, out: FileOutputStream
     ) {
         for (server in UPSTREAM_SERVERS) {
-            val socket = DatagramSocket()
-            try {
-                protect(socket)
-                socket.soTimeout = 2000
-                val addr = InetAddress.getByName(server)
-                socket.send(DatagramPacket(dns, dns.size, addr, 53))
-                val rb = ByteArray(2048)
-                val rp = DatagramPacket(rb, rb.size)
-                socket.receive(rp)
-                val reply = rb.copyOf(rp.length)
+            val reply = ask(server, dns)
+            if (reply != null) {
                 write(out, buildPacket(dstIp, srcIp, 53, srcPort, reply))
                 return
-            } catch (e: Exception) {
-                // try the next server
-            } finally {
-                socket.close()
             }
         }
+    }
+
+    private fun forwardSafe(
+        dns: ByteArray, qEnd: Int, safeHost: String,
+        dstIp: ByteArray, srcIp: ByteArray, srcPort: Int, out: FileOutputStream
+    ) {
+        val rewritten = rewriteQuestion(dns, qEnd, safeHost)
+        for (server in UPSTREAM_SERVERS) {
+            val reply = ask(server, rewritten)
+            if (reply != null) {
+                // Keep the original question bytes so the app accepts the answer
+                val fixed = restoreQuestion(reply, dns, qEnd)
+                write(out, buildPacket(dstIp, srcIp, 53, srcPort, fixed))
+                return
+            }
+        }
+    }
+
+    private fun ask(server: String, dns: ByteArray): ByteArray? {
+        val socket = DatagramSocket()
+        return try {
+            protect(socket)
+            socket.soTimeout = 2000
+            val addr = InetAddress.getByName(server)
+            socket.send(DatagramPacket(dns, dns.size, addr, 53))
+            val rb = ByteArray(2048)
+            val rp = DatagramPacket(rb, rb.size)
+            socket.receive(rp)
+            rb.copyOf(rp.length)
+        } catch (e: Exception) {
+            null
+        } finally {
+            socket.close()
+        }
+    }
+
+    // Build a query for safeHost, keeping id/flags and the qtype/qclass
+    private fun rewriteQuestion(dns: ByteArray, qEnd: Int, safeHost: String): ByteArray {
+        val header = dns.copyOfRange(0, 12)
+        val tail = dns.copyOfRange(qEnd - 4, qEnd)
+        val name = encodeName(safeHost)
+        val out = ByteArray(12 + name.size + 4)
+        System.arraycopy(header, 0, out, 0, 12)
+        out[4] = 0
+        out[5] = 1
+        for (k in 6..11) out[k] = 0
+        System.arraycopy(name, 0, out, 12, name.size)
+        System.arraycopy(tail, 0, out, 12 + name.size, 4)
+        return out
+    }
+
+    // Put the original question back in front of the answer section
+    private fun restoreQuestion(reply: ByteArray, original: ByteArray, qEnd: Int): ByteArray {
+        var i = 12
+        while (i < reply.size && (reply[i].toInt() and 0xFF) != 0) {
+            i += (reply[i].toInt() and 0xFF) + 1
+        }
+        val replyQEnd = i + 1 + 4
+        if (replyQEnd > reply.size) return reply
+        val originalQuestion = original.copyOfRange(12, qEnd)
+        val rest = reply.copyOfRange(replyQEnd, reply.size)
+        val out = ByteArray(12 + originalQuestion.size + rest.size)
+        System.arraycopy(reply, 0, out, 0, 12)
+        System.arraycopy(originalQuestion, 0, out, 12, originalQuestion.size)
+        System.arraycopy(rest, 0, out, 12 + originalQuestion.size, rest.size)
+        return out
+    }
+
+    private fun encodeName(host: String): ByteArray {
+        val parts = host.split(".")
+        var size = 1
+        for (p in parts) size += p.length + 1
+        val out = ByteArray(size)
+        var pos = 0
+        for (p in parts) {
+            out[pos++] = p.length.toByte()
+            for (c in p) out[pos++] = c.code.toByte()
+        }
+        out[pos] = 0
+        return out
     }
 
     private fun write(out: FileOutputStream, packet: ByteArray) {
@@ -253,7 +329,9 @@ class SafeGuardVpnService : VpnService() {
         const val ACTION_STOP = "com.safeguard.app.STOP"
         private const val CHANNEL_ID = "safeguard_protection"
         private const val NOTIFICATION_ID = 1
-        private val UPSTREAM_SERVERS = listOf("1.1.1.1", "8.8.8.8")
+
+        // CleanBrowsing Adult Filter (blocks adult sites at the DNS level)
+        private val UPSTREAM_SERVERS = listOf("185.228.168.10", "185.228.169.11")
 
         @Volatile
         var running: Boolean = false
@@ -261,11 +339,33 @@ class SafeGuardVpnService : VpnService() {
         @Volatile
         var blockedCount: Int = 0
 
-        private val KEYWORDS = listOf("porn", "hentai", "xvideos", "xnxx", "xhamster")
+        // SafeSearch enforcement
+        private val SAFE_SEARCH = mapOf(
+            "google.com" to "forcesafesearch.google.com",
+            "www.google.com" to "forcesafesearch.google.com",
+            "google.com.bd" to "forcesafesearch.google.com",
+            "www.google.com.bd" to "forcesafesearch.google.com",
+            "bing.com" to "strict.bing.com",
+            "www.bing.com" to "strict.bing.com",
+            "youtube.com" to "restrict.youtube.com",
+            "www.youtube.com" to "restrict.youtube.com",
+            "m.youtube.com" to "restrict.youtube.com",
+            "youtubei.googleapis.com" to "restrict.youtube.com",
+            "duckduckgo.com" to "safe.duckduckgo.com",
+            "www.duckduckgo.com" to "safe.duckduckgo.com"
+        )
+
+        // Only unmistakable adult words, to avoid blocking normal sites
+        private val KEYWORDS = listOf(
+            "porn", "hentai", "xvideos", "xnxx", "xhamster", "xxx",
+            "sexcam", "livesex", "freeporn", "nudes", "camgirl", "camsex",
+            "javhd", "pornhub", "redtube", "youporn", "spankbang", "rule34",
+            "milf", "onlyfans", "chaturbate", "stripchat", "bongacams"
+        )
 
         private val WHITELIST = setOf(
-            "google.com", "youtube.com", "wikipedia.org", "facebook.com",
-            "github.com", "microsoft.com", "apple.com", "amazon.com"
+            "wikipedia.org", "facebook.com", "github.com", "microsoft.com",
+            "apple.com", "amazon.com"
         )
 
         private val BLOCKED_DOMAINS = setOf(
@@ -274,7 +374,17 @@ class SafeGuardVpnService : VpnService() {
             "brazzers.com", "chaturbate.com", "stripchat.com", "bongacams.com",
             "livejasmin.com", "cam4.com", "motherless.com", "thumbzilla.com",
             "tnaflix.com", "hclips.com", "txxx.com", "nhentai.net", "e-hentai.org",
-            "onlyfans.com", "fapello.com", "erome.com", "sxyprn.com", "4tube.com"
+            "onlyfans.com", "fapello.com", "erome.com", "sxyprn.com", "4tube.com",
+            "porntrex.com", "porn.com", "fuq.com", "drtuber.com", "xtube.com",
+            "pornone.com", "daftsex.com", "hqporner.com", "fapvid.com",
+            "camsoda.com", "myfreecams.com", "imlive.com", "flirt4free.com",
+            "rule34.xxx", "gelbooru.com", "danbooru.donmai.us", "hanime.tv",
+            "hentaihaven.xxx", "reddit-nsfw.com", "sex.com", "xhamster2.com",
+            "yespornplease.com", "pornpics.com", "nuvid.com", "slutload.com",
+            "xvideos2.com", "pornhubpremium.com", "fansly.com", "manyvids.com",
+            "clips4sale.com", "javmost.com", "jav.guru", "missav.com",
+            "spankwire.com", "keezmovies.com", "extremetube.com", "pornhd.com",
+            "gotporn.com", "sunporno.com", "empflix.com", "porndig.com"
         )
     }
 }
