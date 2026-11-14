@@ -86,31 +86,53 @@ class SafeGuardAccessibilityService : AccessibilityService() {
 
     private fun isDangerous(pkg: String, screen: String): Boolean {
         val mentionsApp = screen.contains("safeguard")
-                // Reset app preferences (menu row or confirmation dialog)
-      if (pkg == "com.android.settings" && (
+
+        // Uninstall dialog from the package installer
+        if (pkg.contains("packageinstaller") && mentionsApp) return true
+
+        // Reset app preferences (menu row or confirmation dialog)
+        if (pkg == "com.android.settings" && (
                 screen.contains("reset app preferences") ||
                 screen.contains("reset app settings") ||
                 screen.contains("reset apps"))
         ) return true
 
-        if (pkg.contains("packageinstaller") && mentionsApp) return true
+        // Display over other apps: SafeGuard's permission page
+        if (pkg == "com.android.settings" && mentionsApp && (
+                screen.contains("display over other apps") ||
+                screen.contains("appear on top") ||
+                screen.contains("draw over other apps") ||
+                screen.contains("allow display over"))
+        ) return true
 
+        // Battery settings of SafeGuard (restricted / optimization)
+        if (pkg == "com.android.settings" && mentionsApp && (
+                screen.contains("battery") ||
+                screen.contains("restricted") ||
+                screen.contains("optimi"))
+        ) return true
+
+        // SafeGuard app info (uninstall / force stop)
         if (mentionsApp && (screen.contains("uninstall") || screen.contains("force stop"))) {
             return true
         }
 
+        // Device admin pages
         if (screen.contains("device admin") && (mentionsApp || screen.contains("admin apps"))) {
             return true
         }
 
+        // Accessibility usage page (inner page), not the Privacy main page
         if (mentionsApp && screen.contains("accessibility usage") && !isPrivacyMainPage(screen)) {
             return true
         }
 
+        // Accessibility list page that lists SafeGuard
         if (mentionsApp && screen.contains("accessibility") && !isPrivacyMainPage(screen)) {
             return true
         }
 
+        // SafeGuard's own accessibility service page
         if (mentionsApp && (
                 screen.contains("use safeguard") ||
                 screen.contains("stop safeguard") ||
@@ -118,12 +140,14 @@ class SafeGuardAccessibilityService : AccessibilityService() {
                 screen.contains("view and control screen"))
         ) return true
 
+        // VPN settings of SafeGuard
         if (mentionsApp && (
                 screen.contains("always-on vpn") ||
                 screen.contains("block connections without vpn") ||
                 screen.contains("forget"))
         ) return true
 
+        // VPN list page (not the Network main page)
         if (mentionsApp && screen.contains("vpn") && !isNetworkMainPage(screen)) return true
 
         return false
