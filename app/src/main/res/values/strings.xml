@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="accessibility_description">SafeGuard only watches the Settings and package installer screens to stop protection from being turned off or removed. It does not read or store anything else.</string>
+    <string name="accessibility_description">SafeGuard only checks the Settings, package installer and home screen launcher for uninstall or disable options so protection cannot be removed. It ignores all other apps and does not read or store anything.</string>
 </resources>
